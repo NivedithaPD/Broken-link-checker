@@ -660,7 +660,7 @@ body{background:#f7f7f5;color:#1e293b;font-family:'DM Mono','Fira Code',monospac
     <div class="actions">
       <button class="btn btn-primary" id="scan-btn">&#128269; Crawl Selected Topics</button>
       <button class="btn btn-stop" id="stop-btn" style="display:none">&#9632; Stop</button>
-      <button class="btn btn-ghost" id="export-btn" style="display:none;margin-left:auto">&#8595; Export CSV</button>
+
     </div>
 
     <div id="error-box"></div>
@@ -699,7 +699,7 @@ let tocData=[], baseUrl="";
 const $=id=>document.getElementById(id);
 
 const badge=$("badge"), badgeDot=$("badge-dot"), badgeTxt=$("badge-text");
-const urlInput=$("url-input"), scanBtn=$("scan-btn"), stopBtn=$("stop-btn"), exportBtn=$("export-btn");
+const urlInput=$("url-input"), scanBtn=$("scan-btn"), stopBtn=$("stop-btn");
 const errorBox=$("error-box"), crawlBox=$("crawl-box"), progBox=$("progress-box");
 const progText=$("prog-text"), progPct=$("prog-pct"), progFill=$("prog-fill");
 const filtersBox=$("filters-box"), resultsTable=$("results-table"), resultsBody=$("results-body");
@@ -843,7 +843,6 @@ document.querySelectorAll(".tab").forEach(btn=>{btn.addEventListener("click",()=
 // ===== SCAN =====
 scanBtn.addEventListener("click",startScan);
 stopBtn.addEventListener("click",()=>{if(abortCtrl)abortCtrl.abort();scanning=false;updateUI();});
-exportBtn.addEventListener("click",doExport);
 
 function startScan(){
   results=[];scanning=true;filter="all";pagesCrawled=0;
@@ -936,7 +935,6 @@ function addRow(r,idx){
 
 function updateUI(){
   scanBtn.style.display=scanning?"none":"";stopBtn.style.display=scanning?"":"none";
-  exportBtn.style.display=(!scanning&&results.length>0)?"":"none";
   emptyState.style.display=(!scanning&&results.length===0)?"flex":"none";
 
   if(results.length>0){
@@ -971,11 +969,7 @@ function applyFilter(){
     row.style.display=(filter==="all"||row.dataset.status===filter)?"":"none";});
 }
 
-function doExport(){
-  const h="Link Text,URL,Status,HTTP Code,Time,Found On Page(s),Note,Final URL\n";
-  const rows=results.map(r=>`"${(r.linkText||"").replace(/"/g,'""')}","${r.url}","${S[r.status]?.l||r.status}","${r.code||""}","${r.time||""}s","${(r.sourcePages||[]).join(" | ")}","${r.note}","${r.finalUrl}"`).join("\n");
-  const blob=new Blob([h+rows],{type:"text/csv"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="broken-links-report.csv";a.click();
-}
+
 </script>
 </body>
 </html>"""
