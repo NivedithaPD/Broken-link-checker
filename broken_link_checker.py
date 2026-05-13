@@ -7,7 +7,7 @@ Opens automatically in your browser.
 Install once:  pip install flask requests beautifulsoup4
 """
 
-import time, json, urllib3, webbrowser, threading
+import time, json, urllib3, webbrowser, threading, xml.etree.ElementTree as ET
 from urllib.parse import urljoin, urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import deque
@@ -160,6 +160,106 @@ def fetch_page_urllib(url):
     except Exception as e:
         print(f"  [urllib] {url} -> ERROR: {e}")
     return None
+
+def fetch_sitemap(base_url):
+    """Try to fetch and parse sitemap.xml for a documentation site."""
+    base = base_url.rstrip("/")
+    sitemap_urls = [base + "/sitemap.xml"]
+    # Also try one level up in case base_url is deep
+    parsed_base = urlparse(base)
+    parent = parsed_base.scheme + "://" + parsed_base.netloc + "/".join(parsed_base.path.rstrip("/").split("/")[:-1]) + "/sitemap.xml"
+    if parent not in sitemap_urls:
+        sitemap_urls.append(parent)
+
+    for sitemap_url in sitemap_urls:
+        print(f"  [sitemap] Trying {sitemap_url}")
+        for fetcher in [fetch_page, fetch_page_urllib]:
+            xml_text = fetcher(sitemap_url)
+            if xml_text and "<urlset" in xml_text:
+                try:
+                    # Strip namespace for easier parsing
+                    xml_text = xml_text.replace(' xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"', '')
+                    xml_text = xml_text.replace(' xmlns:xsi="http://www.sitemaps.org/schemas/sitemap/0.9"', '')
+                    root = ET.fromstring(xml_text)
+                    urls = []
+                    for url_elem in root.findall(".//url"):
+                        loc = url_elem.find("loc")
+                        if loc is not None and loc.text:
+                            urls.append(loc.text.strip())
+                    if urls:
+                        print(f"  [sitemap] Found {len(urls)} URLs in {sitemap_url}")
+                        return urls
+                except ET.ParseError as e:
+                    print(f"  [sitemap] XML parse error: {e}")
+    return []
+
+def build_toc_from_sitemap_urls(urls, base_url):
+    """Build a hierarchical TOC tree from a flat list of sitemap URLs."""
+    base_path = urlparse(base_url).path.rstrip("/")
+
+    # Filter to only URLs within the base path
+    filtered = []
+    for u in urls:
+        p = urlparse(u)
+        if p.path.rstrip("/").startswith(base_path) and p.path.rstrip("/") != base_path:
+            filtered.append(u)
+
+    if not filtered:
+        return []
+
+    # Build a nested dict from URL paths
+    tree = {}
+    for u in filtered:
+        rel = urlparse(u).path[len(base_path):].strip("/")
+        parts = [p for p in rel.split("/") if p]
+        node = tree
+        for part in parts:
+            if part not in node:
+                node[part] = {"_url": None, "_children": {}}
+            node = node[part]["_children"] if part != parts[-1] else node[part]
+        # Assign URL to the leaf/node
+        node["_url"] = u
+
+    def dict_to_toc(d):
+        """Convert nested dict to TOC list format."""
+        items = []
+        for key, val in sorted(d.items()):
+            if key.startswith("_"):
+                continue
+            url = val.get("_url", "")
+            children_dict = val.get("_children", {})
+            # Generate a readable label from the key
+            label = key.replace(".html", "").replace("-", " ").replace("_", " ")
+            label = label.replace("index", "").strip()
+            if not label:
+                label = key
+            label = label.title()
+            children = dict_to_toc(children_dict) if children_dict else []
+            if url or children:
+                items.append({
+                    "url": url or "",
+                    "text": label,
+                    "children": children
+                })
+        return items
+
+    toc = dict_to_toc(tree)
+
+    # Flatten single-level wrappers that have no URL but one child group
+    def flatten_if_needed(items):
+        result = []
+        for item in items:
+            item["children"] = flatten_if_needed(item["children"])
+            # If this node has no URL and only one child, promote the child
+            if not item["url"] and len(item["children"]) == 1:
+                child = item["children"][0]
+                child["text"] = item["text"] + " > " + child["text"]
+                result.append(child)
+            else:
+                result.append(item)
+        return result
+
+    return flatten_if_needed(toc)
 
 SMARTBEAR_PRODUCTS = [
     {"url": "https://support.smartbear.com/testcomplete/docs/", "text": "TestComplete"},
@@ -336,6 +436,15 @@ def fetch_toc():
                             break
             if toc_tree:
                 break
+
+    if not toc_tree:
+        # Strategy 4: Try fetching sitemap.xml (works for non-Paligo sites like TestComplete, ReadyAPI)
+        print(f"  [toc] Trying sitemap.xml fallback for {url}")
+        sitemap_urls = fetch_sitemap(url)
+        if sitemap_urls:
+            toc_tree = build_toc_from_sitemap_urls(sitemap_urls, url)
+            if toc_tree:
+                print(f"  [toc] Built TOC from sitemap.xml with {len(toc_tree)} top-level items")
 
     if not toc_tree:
         # Last resort: if SmartBear URL, fall back to product catalog
